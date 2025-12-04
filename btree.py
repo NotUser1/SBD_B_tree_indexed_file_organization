@@ -177,7 +177,8 @@ class BTree:
             off = next_off
         return path
 
-    def split_node(self, path, new_record_offset, leaf_offset=None, current_node=None):
+    def split_node(self, path, new_record_offset, leaf_offset=None, current_node=None, new_child_offset=None):
+        print("split_node called")
         # we need to handle root split here also because split_node is called from handle_overflow recursively ?
         # no need because handle_overflow checks for root split first
         # #sanity_check
@@ -208,7 +209,8 @@ class BTree:
                 current_node.record_pointers[i] = left_rps[i]
             else:
                 current_node.record_pointers[i] = 0
-        current_node.children_pointers = [0] * (RECORDS_PER_NODE + 1)
+        left_children = current_node.children_pointers[:mid_index + 1]
+        current_node.children_pointers = left_children + [0] * (RECORDS_PER_NODE + 1 - len(left_children))
         self.write_page(current_node, leaf_offset)
 
         # create and save right node to the end of btree file
@@ -218,37 +220,48 @@ class BTree:
                 right_node.record_pointers[i] = right_rps[i]
             else:
                 right_node.record_pointers[i] = 0
-        right_node.children_pointers = [0] * (RECORDS_PER_NODE + 1)
+        right_children = current_node.children_pointers[mid_index + 1:]
+        right_node.children_pointers = right_children + [0] * (RECORDS_PER_NODE + 1 - len(right_children))
+        # right_node.is_leaf = all(ptr == 0 for ptr in right_node.children_pointers)
         with open(BTREE_FILE, 'ab') as f:
             f.seek(0, 2)
             right_node_offset = f.tell()
             f.write(right_node.pack())
             f.flush()
 
+        # print(self._count_occupied_rps(parent_node))
+
         # insert mid_value into parent node
-        parent_occupied = self._count_occupied_rps(parent_node)
-        insert_index = 0
-        for i in range(parent_occupied, child_index, -1):
-            parent_node.record_pointers[i] = parent_node.record_pointers[i - 1]
-        parent_node.record_pointers[child_index] = mid_value
-
-        # adjust child pointers
-        for i in range(parent_occupied + 1, child_index + 1, -1):
-            parent_node.children_pointers[i] = parent_node.children_pointers[i - 1]
-        parent_node.children_pointers[child_index + 1] = right_node_offset
-
-        self.write_page(parent_node, parent_offset)
-
-        if self._count_occupied_rps(parent_node) > RECORDS_PER_NODE:
+        if self._count_occupied_rps(parent_node) >= RECORDS_PER_NODE:
             # parent overflow
-            return self.handle_overflow(path[:-1], parent_node.record_pointers[child_index], parent_offset, parent_node)
+            return self.handle_overflow(path[:-1], mid_value, parent_offset, parent_node, right_node_offset)
+            # print(f"parent offset {parent_offset}, children pointers: {parent_node.children_pointers}")
+        else:
+            parent_occupied = self._count_occupied_rps(parent_node)
+            for i in range(parent_occupied, child_index, -1):
+                parent_node.record_pointers[i] = parent_node.record_pointers[i - 1]
+            parent_node.record_pointers[child_index] = mid_value
+
+            # adjust child pointers
+            for i in range(parent_occupied + 1, child_index + 1, -1):
+                parent_node.children_pointers[i] = parent_node.children_pointers[i - 1]
+            parent_node.children_pointers[child_index + 1] = new_child_offset if new_child_offset is not None else right_node_offset
+
+            self.write_page(parent_node, parent_offset)
 
         return {"status": "node_split_done"}
 
-    def split_root(self, new_record_offset, leaf_offset=None, current_node=None):
+    def split_root(self, new_record_offset, leaf_offset=None, current_node=None, new_child_offset=None):
+        print("split_root called")
+        # print(f"asd {new_record_offset}")
+        # self.print_tree()
+
         if current_node is None:
             current_node = self.read_page(self.root_offset)
             leaf_offset = self.root_offset
+
+        org_children = list(current_node.children_pointers)
+        print(new_child_offset, leaf_offset)
 
         temp = [rp for rp in current_node.record_pointers if rp != 0]
         temp.append(new_record_offset)
@@ -260,6 +273,15 @@ class BTree:
         left_rps = temp[:mid_index]
         right_rps = temp[mid_index + 1:]
 
+        temp_new_children = list(current_node.children_pointers)
+        if new_child_offset is not None:
+            try:
+                index = temp.index(new_record_offset)
+                insert_pos = index + 1
+                temp_new_children.insert(insert_pos, new_child_offset)
+            except ValueError:
+                pass
+
         # save left node (current root) to current node
         left_node = BTreeNode()
         for i in range(RECORDS_PER_NODE):
@@ -267,7 +289,9 @@ class BTree:
                 left_node.record_pointers[i] = left_rps[i]
             else:
                 left_node.record_pointers[i] = 0
-        left_node.children_pointers = [0] * (RECORDS_PER_NODE + 1)
+
+        left_children = temp_new_children[:mid_index + 1]
+        left_node.children_pointers = left_children + [0] * (RECORDS_PER_NODE + 1 - len(left_children))
         with open(BTREE_FILE, 'ab') as f:
             f.seek(0, 2)
             left_offset = f.tell()
@@ -281,7 +305,8 @@ class BTree:
                 right_node.record_pointers[i] = right_rps[i]
             else:
                 right_node.record_pointers[i] = 0
-        right_node.children_pointers = [0] * (RECORDS_PER_NODE + 1)
+        right_children = temp_new_children[mid_index + 1:]
+        right_node.children_pointers = right_children + [0] * (RECORDS_PER_NODE + 1 - len(right_children))
         with open(BTREE_FILE, 'ab') as f:
             f.seek(0, 2)
             right_offset = f.tell()
@@ -302,17 +327,21 @@ class BTree:
 
         return {"status": "root_split_done"}
 
-    def handle_overflow(self, path, new_record_offset, leaf_offset=None, current_node=None):
+    def handle_overflow(self, path, new_record_offset, leaf_offset=None, current_node=None, new_child_offset=None):
+        print("handle_overflow called")
+
+        print(f"sdasd {new_child_offset}")
+
         if len(path) < 2:
             print("splitting root")
-            return self.split_root(new_record_offset, leaf_offset, current_node)
+            return self.split_root(new_record_offset, leaf_offset, current_node, new_child_offset)
 
         parent_node, parent_offset = path[-2]
         try:
             child_index = parent_node.children_pointers.index(leaf_offset)
         except ValueError:
             print("splitting a root 2")
-            return self.split_root(new_record_offset, leaf_offset, current_node)
+            return self.split_root(new_record_offset, leaf_offset, current_node, new_child_offset)
 
         # now we check if compensation is possible:
         # 1. start with left sibling
@@ -410,7 +439,7 @@ class BTree:
             return {"status": "compensated_right"}
         #   4. if compensation is not possible, perform split
         print("splitting node")
-        return self.split_node(path, new_record_offset, leaf_offset, current_node)
+        return self.split_node(path, new_record_offset, leaf_offset, current_node, new_child_offset)
 
     def insert(self, record: Record):
         found, node, node_offset, index = self.search(record.key)
