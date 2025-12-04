@@ -14,12 +14,6 @@ def init_files():
     with open(BTREE_FILE, 'wb') as f:
         pass  # Initialize an empty B-Tree file
 
-def print_root(btree):
-    node = btree.read_page(btree.root_offset)
-    keys = node.get_key_list(btree.read_record)
-    print("Root keys:", keys)
-
-
 def main():
     print("xd")
     init_files()
@@ -33,7 +27,7 @@ def main():
     for key in test_data:
         record = Record(key, round(random.uniform(0.0, 1000.0)/100, 2), round(random.uniform(0.0, 1000.0)/100, 2))
         print(f"Inserting record with key: {key}")
-        input("Press Enter to continue...")
+        # input("Press Enter to continue...")
         if btree.height == 0:
             # First insertion
             btree.create_root(record)
