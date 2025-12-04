@@ -21,8 +21,4 @@ def generate_random_records(num_records):
             y = round(random.uniform(0.0, 1000.0)/100, 2)
             f.write(RECORD_STRUCT.pack(key, x, y))
 
-def create_btree_file():
-    with open(BTREE_FILE, 'wb') as f:
-        pass  # Initialize an empty B-Tree file
-
 
