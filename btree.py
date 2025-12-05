@@ -91,9 +91,12 @@ class BTree:
         self.root = BTreeNode()
         self.root_offset = 0
         self.height = 0
+        self.operation_page_reads = 0
+        self.operation_page_writes = 0
+        self.operation_page_appends = 0
 
-    @staticmethod
-    def read_page(file_offset: int) -> BTreeNode:
+    def read_page(self, file_offset: int) -> BTreeNode:
+        self.operation_page_reads += 1
         with open(BTREE_FILE, 'rb') as f:
             f.seek(file_offset)
             data = f.read(BTreeNode.NODE_SIZE)
@@ -101,12 +104,21 @@ class BTree:
                 raise ValueError("Failed to read a complete B-Tree node from file.")
         return BTreeNode.unpack(data)
 
-    @staticmethod
-    def write_page(node: BTreeNode, file_offset: int):
+    def write_page(self, node: BTreeNode, file_offset: int):
+        self.operation_page_writes += 1
         with open(BTREE_FILE, 'r+b') as f:
             f.seek(file_offset)
             f.write(node.pack())
             f.flush()
+
+    def append_page(self, node: BTreeNode) -> int:
+        self.operation_page_appends += 1
+        with open(BTREE_FILE, 'ab') as f:
+            f.seek(0, 2)
+            node_pointer = f.tell()
+            f.write(node.pack())
+            f.flush()
+        return node_pointer
 
     @staticmethod
     def append_record(record: Record) -> int:
@@ -124,12 +136,7 @@ class BTree:
         root = BTreeNode()
         root.keys[0] = record.key
         root.record_pointers[0] = new_record_offset
-        root_packed = root.pack()
-        with open(BTREE_FILE, 'ab') as f:
-            f.seek(0)
-            self.root_offset = f.tell()
-            f.write(root_packed)
-            f.flush()
+        self.root_offset = self.append_page(root)
         self.height = 1
 
     def search(self, key: int):
@@ -223,11 +230,7 @@ class BTree:
         right_children = current_node.children_pointers[mid_index + 1:]
         right_node.children_pointers = right_children + [0] * (RECORDS_PER_NODE + 1 - len(right_children))
         # right_node.is_leaf = all(ptr == 0 for ptr in right_node.children_pointers)
-        with open(BTREE_FILE, 'ab') as f:
-            f.seek(0, 2)
-            right_node_offset = f.tell()
-            f.write(right_node.pack())
-            f.flush()
+        right_node_offset = self.append_page(right_node)
 
         # insert mid_value into parent node
         if self._count_occupied_rps(parent_node) >= RECORDS_PER_NODE:
@@ -290,11 +293,7 @@ class BTree:
                 left_node.record_pointers[i] = 0
         left_children = temp_new_children[:mid_index + 1]
         left_node.children_pointers = left_children + [0] * (RECORDS_PER_NODE + 1 - len(left_children))
-        with open(BTREE_FILE, 'ab') as f:
-            f.seek(0, 2)
-            left_offset = f.tell()
-            f.write(left_node.pack())
-            f.flush()
+        left_offset = self.append_page(left_node)
 
         # create and save right node to the end of btree file
         right_node = BTreeNode()
@@ -307,11 +306,7 @@ class BTree:
                 right_node.record_pointers[i] = 0
         right_children = temp_new_children[mid_index + 1:]
         right_node.children_pointers = right_children + [0] * (RECORDS_PER_NODE + 1 - len(right_children))
-        with open(BTREE_FILE, 'ab') as f:
-            f.seek(0, 2)
-            right_offset = f.tell()
-            f.write(right_node.pack())
-            f.flush()
+        right_offset = self.append_page(right_node)
 
         # create new root, add mid_value and 2 children to it to offset 0
         new_root = BTreeNode()
@@ -452,7 +447,8 @@ class BTree:
             self.write_page(right_sibling, right_sibling_offset)
             return {"status": "compensated_right"}
 
-    def handle_overflow(self, path, new_record_offset, new_record_key, leaf_offset=None, current_node=None, new_child_offset=None):
+    def handle_overflow(self, path, new_record_offset, new_record_key, leaf_offset=None, current_node=None,
+                        new_child_offset=None):
         print("handle_overflow called")
 
         if len(path) < 2:
@@ -479,6 +475,7 @@ class BTree:
 
     def insert(self, record: Record):
         found, path, node, node_offset, index = self.search(record.key)
+
         if found:
             print("Record with the same key already exists.")
             return {"status": "already_exists"}
@@ -511,6 +508,21 @@ class BTree:
         # OVERFLOW
         self.handle_overflow(path, new_record_offset, new_record_key, leaf_offset, leaf_node)
         return {"status": "overflow_handled"}
+
+    def delete(self, record_key: int):
+        found, path, node, node_offset, index = self.search(record_key)
+
+        if not found:
+            print("Record with this key does not exist.")
+            return {"status": "not_found"}
+
+        leaf_node, leaf_offset = path[-1]
+
+        keys = leaf_node.get_key_list()
+
+        # Klaudia kazała mi iść spać :sad_face:
+
+        return {"status": "key_deleted"}
 
     def print_tree(self):
         self._print_subtree(self.root_offset, 0)

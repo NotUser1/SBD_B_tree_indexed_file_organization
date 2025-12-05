@@ -7,3 +7,6 @@ RECORD_SIZE = RECORD_STRUCT.size
 
 DATA_FILE = 'records.bin'
 BTREE_FILE = 'btree.bin'
+
+DATA_PAGE_READS = 0
+DATA_PAGE_WRITES = 0
