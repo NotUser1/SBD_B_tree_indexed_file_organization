@@ -1,3 +1,5 @@
+import os.path
+
 from conf import *
 from typing import Tuple
 
@@ -72,7 +74,6 @@ class BTreeNode:
             tuples.append((self.keys[i], rp))
         return tuples
 
-    # TODO: implement getting real data from record pointer (for displaying purposes)
     def get_data_from_node(self):
         data = []
         for i in range(RECORDS_PER_NODE):
@@ -91,8 +92,12 @@ class BTree:
         self.operation_page_writes = 0
         self.operation_page_appends = 0
         self.freed_pages = []
+        self.data_page = None
+        self.data_page_offset = None
+        self.deletion_holes = None
 
     def read_page(self, file_offset: int) -> BTreeNode:
+        print("xd")
         self.operation_page_reads += 1
         with open(BTREE_FILE, 'rb') as f:
             f.seek(file_offset)
@@ -785,7 +790,9 @@ class BTree:
 
         if not node.is_leaf:
             # the biggest form left child
-            pred_key, pred_ptr, pred_leaf_node, pred_leaf_offset, pred_index, pred_path = self.find_predecessor(path, node, index)
+            pred_key, pred_ptr, pred_leaf_node, pred_leaf_offset, pred_index, pred_path = self.find_predecessor(path,
+                                                                                                                node,
+                                                                                                                index)
             # print("predecessor found:", pred_key)
 
             node.keys[index] = pred_key
@@ -801,7 +808,15 @@ class BTree:
             leaf_offset = node_offset
             delete_index = index
 
+        deleted_record_offset = leaf_node.record_pointers[delete_index]
         self.delete_from_leaf(leaf_node, leaf_offset, delete_index)
+
+        if deleted_record_offset is not None:
+            self.deletion_holes.append(deleted_record_offset)
+
+        if len(self.deletion_holes) >= RECORDS_PER_NODE:
+            print("Automatic data file compaction triggered.")
+            self.reorganize_data_file()
 
         occupied = self.count_occupied_rps(leaf_node)
         if occupied >= (RECORDS_PER_NODE + 1) // 2 or leaf_offset == self.root_offset:
@@ -817,6 +832,7 @@ class BTree:
 
     def _print_subtree(self, node_offset: int, level: int):
         node = self.read_page(node_offset)
+        self.operation_page_reads -= 1  # avoid counting reads for printing
         keys = node.get_key_list()
         print("    " * level + f"Level {level} | Node Offset: {node_offset} | Keys: {[k[0] for k in keys]}")
         if not node.is_leaf:
@@ -833,3 +849,98 @@ class BTree:
         print(f"Page writes: {self.operation_page_writes}")
         print(f"Page appends: {self.operation_page_appends}")
         print(f"Length of freed pages list: {len(self.freed_pages)}")
+        self.operation_page_reads = 0
+        self.operation_page_writes = 0
+        self.operation_page_appends = 0
+
+    def read_record_from_data_file(self, record_offset: int = None, key: int = None) -> None | Record:
+        if record_offset is None and key is None:
+            return None
+
+        if key is not None and record_offset is None:
+            found, path, node, node_offset, index = self.search(key)
+            if not found:
+                return None
+            record_offset = node.record_pointers[index]
+
+        page_size = RECORD_STRUCT.size * RECORDS_PER_PAGE
+        page_start = (record_offset // page_size) * page_size  # this way we may check if we have buffered a right page
+
+        if self.data_page is not None and self.data_page_offset == page_start:
+            # print("Using buffered data page")
+            rel = record_offset - page_start
+            if rel >= 0 and rel + RECORD_STRUCT.size <= len(self.data_page):
+                record_data = self.data_page[rel:rel + RECORD_STRUCT.size]
+                return Record.unpack(record_data)
+
+        # nothing in the buffer or wrong page, read from file
+        with open(DATA_FILE, 'rb') as f:
+            f.seek(page_start)
+            self.data_page = f.read(page_size)
+            self.data_page_offset = page_start
+            rel = record_offset - page_start
+            if rel >= 0 and rel + RECORD_STRUCT.size <= len(self.data_page):
+                record_data = self.data_page[rel:rel + RECORD_STRUCT.size]
+                return Record.unpack(record_data)
+
+        # fallback: bezpośredni odczyt (np. gdy strona krótsza niż oczekiwano)
+        with open(DATA_FILE, 'rb') as f:
+            f.seek(record_offset)
+            data = f.read(RECORD_STRUCT.size)
+            if len(data) < RECORD_STRUCT.size:
+                return None
+        return Record.unpack(data)
+
+    def print_keys_in_order(self):
+        print("Printing whole B-Tree by key order:")
+        # if self.root_offset in None:
+        #     print("B-Tree is empty.")
+        #     return
+
+        def traverse(offset):
+            if offset == 0:
+                pass
+            node = self.read_page(offset)
+            keys = node.get_key_list()
+            if node.is_leaf:
+                for k, rp in keys:
+                    record = self.read_record_from_data_file(record_offset=rp)
+                    print(f"Record: {record}")
+            else:
+                for i in range(len(keys)):
+                    child_offset = node.children_pointers[i]
+                    traverse(child_offset)
+                    k, rp = keys[i]
+                    record = self.read_record_from_data_file(record_offset=rp)
+                    print(f"Record: {record}")
+                # traverse last child
+                last_child_offset = node.children_pointers[len(keys)]
+                traverse(last_child_offset)
+
+        traverse(self.root_offset)
+        self.data_page = None
+        self.data_page_offset = None
+
+    def reorganize_data_file(self):
+        if not self.deletion_holes:
+            print("No deletion holes to compact.")
+            return
+
+        data_file_size = os.path.getsize(DATA_FILE)
+        if data_file_size < RECORD_SIZE:
+            print("Data file is too small to compact.")
+            return
+
+        holes_sorted = set(sorted(self.deletion_holes))
+        last_index = data_file_size // RECORD_SIZE - 1
+        last_offset = last_index * RECORD_SIZE
+
+        while last_offset in holes_sorted and last_index >= 0:
+            holes_sorted.remove(last_offset)
+            data_file_size -= RECORD_SIZE
+            last_index -= 1
+            last_offset = last_index * RECORD_SIZE if last_index >= 0 else -1
+
+        # TODO: finish the compaction and we are done with the code part
+
+
