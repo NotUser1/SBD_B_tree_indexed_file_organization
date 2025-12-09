@@ -24,6 +24,7 @@ def handle_keyboard_operations(btree):
         print("4. Exit")
         print("5. Print B-Tree by key")
         print("6. Update record in data file")
+        print("7. Reorganize data file")
         choice = input("Enter your choice: ")
         if choice == '1':
             key = int(input("Enter key (integer): "))
@@ -35,7 +36,6 @@ def handle_keyboard_operations(btree):
                 btree.create_root(Record(key, x, y))
             else:
                 btree.insert(Record(key, x, y))
-            btree.print_operation_stats()
         elif choice == '2':
             key = int(input("Enter key to search for: "))
             result = btree.search(key)
@@ -56,8 +56,12 @@ def handle_keyboard_operations(btree):
             new_x = float(input("Enter new x value (float): "))
             new_y = float(input("Enter new y value (float): "))
             update_record_in_data_file(key, new_x, new_y)
+        elif choice == '7':
+            btree.reorganize_data_file()
         else:
             print("Invalid choice. Please try again.")
+        btree.print_operation_stats()
+        print("----------------------------------------")
 
 
 def handle_file_operations(btree, file_path):
@@ -72,6 +76,7 @@ def handle_file_operations(btree, file_path):
                 x = float(parts[2])
                 y = float(parts[3])
                 if btree.height == 0:
+                    print(key)
                     btree.create_root(Record(key, x, y))
                 else:
                     btree.insert(Record(key, x, y))
@@ -79,7 +84,7 @@ def handle_file_operations(btree, file_path):
             elif operation == 'search' and len(parts) == 2:
                 key = int(parts[1])
                 result = btree.search(key)
-                if not result:
+                if not result[0]:
                     print("Record not found.")
                 else:
                     print("need to implement offset to record retrieval")

@@ -94,10 +94,9 @@ class BTree:
         self.freed_pages = []
         self.data_page = None
         self.data_page_offset = None
-        self.deletion_holes = None
+        self.deletion_holes = []
 
     def read_page(self, file_offset: int) -> BTreeNode:
-        print("xd")
         self.operation_page_reads += 1
         with open(BTREE_FILE, 'rb') as f:
             f.seek(file_offset)
@@ -138,7 +137,6 @@ class BTree:
     def create_root(self, record: Record):
         new_record_offset = self.append_record(record)
         self.root.record_pointers[0] = new_record_offset
-        # create a node
         root = BTreeNode()
         root.keys[0] = record.key
         root.record_pointers[0] = new_record_offset
@@ -551,6 +549,7 @@ class BTree:
         self.write_page(leaf_node, leaf_offset)
 
     def compensation_on_delete(self, path, leaf_node, leaf_offset, delete_index) -> bool:
+        print("compensation_on_delete called")
         if len(path) < 2:
             # cannot compensate on root (chyba)
             return False
@@ -568,7 +567,7 @@ class BTree:
                 left_sibling = self.read_page(left_sibling_offset)
                 left_occupied = self.count_occupied_rps(left_sibling)
                 if left_occupied > (RECORDS_PER_NODE + 1) // 2:
-                    # print("compensating delete with left sibling")
+                    print("compensating delete with left sibling")
                     # same as with normal compensation
                     # create temp array
                     # middle goes to parent
@@ -579,7 +578,7 @@ class BTree:
                     temp.sort(key=lambda kp: kp[0])
 
                     for i in range(RECORDS_PER_NODE):
-                        if i < len(temp) - 1 - (len(temp) // 2):
+                        if i < len(temp) // 2:
                             left_sibling.keys[i] = temp[i][0]
                             left_sibling.record_pointers[i] = temp[i][1]
                         else:
@@ -641,7 +640,7 @@ class BTree:
         return False
 
     def merge_nodes(self, path, leaf_node, leaf_offset, child_index):
-        # print("merge_nodes called")
+        print("merge_nodes called")
         if len(path) < 2:
             # cannot merge on root (chyba)
             return {"status": "cannot_merge_root"}
@@ -689,6 +688,7 @@ class BTree:
             self.write_page(left_sibling, left_sibling_offset)
 
             remove_parent_key(child_index - 1)
+            parent_node.children_pointers[child_index - 1] = left_sibling_offset
             self.write_page(parent_node, parent_offset)
 
             if self.count_occupied_rps(parent_node) == 0 and parent_offset == self.root_offset:
@@ -696,11 +696,12 @@ class BTree:
                 self.write_page(left_sibling, 0)
                 if left_sibling_offset != self.root_offset:
                     self.freed_pages.append(left_sibling_offset)
-                if leaf_node != self.root_offset:
+                if leaf_offset != self.root_offset:
                     self.freed_pages.append(leaf_offset)
                 if parent_offset != self.root_offset:
                     self.freed_pages.append(parent_offset)
                 self.root_offset = 0
+                self.root = left_sibling
                 self.height = max(1, self.height - 1)
 
             return {"status": "merged_left"}
@@ -714,6 +715,7 @@ class BTree:
             temp.append((parent_node.keys[child_index], parent_node.record_pointers[child_index]))
             temp += right_sibling.get_key_list()
             temp.sort(key=lambda kp: kp[0])
+            print(temp)
 
             for i in range(RECORDS_PER_NODE):
                 if i < len(temp):
@@ -728,9 +730,11 @@ class BTree:
             new_children = lc + rc
             leaf_node.children_pointers = new_children + [0] * (RECORDS_PER_NODE + 1 - len(new_children))
             leaf_node.is_leaf = all(ptr == 0 for ptr in leaf_node.children_pointers)
+            print(leaf_offset)
             self.write_page(leaf_node, leaf_offset)
 
             remove_parent_key(child_index)
+            parent_node.children_pointers[child_index] = leaf_offset
             self.write_page(parent_node, parent_offset)
 
             if self.count_occupied_rps(parent_node) == 0 and parent_offset == self.root_offset:
@@ -738,17 +742,18 @@ class BTree:
                 self.write_page(leaf_node, 0)
                 if right_sibling_offset != self.root_offset:
                     self.freed_pages.append(right_sibling_offset)
-                if leaf_node != self.root_offset:
+                if leaf_offset != self.root_offset:
                     self.freed_pages.append(leaf_offset)
                 if parent_offset != self.root_offset:
                     self.freed_pages.append(parent_offset)
                 self.root_offset = 0
+                self.root = leaf_node
                 self.height = max(1, self.height - 1)
 
             return {"status": "merged_right"}
 
     def handle_underflow(self, path, leaf_node, leaf_offset):
-        # print("handle_underflow called")
+        print("handle_underflow called")
         if len(path) < 2:
             return {"status": "cannot_handle_underflow_root"}
 
@@ -764,6 +769,7 @@ class BTree:
 
         # 2. if compensation not possible, merge nodes
         merge_res = self.merge_nodes(path, leaf_node, leaf_offset, child_index)
+        print(merge_res)
 
         parent_node = self.read_page(parent_offset)
         parent_occupied = self.count_occupied_rps(parent_node)
@@ -794,7 +800,7 @@ class BTree:
                                                                                                                 node,
                                                                                                                 index)
             # print("predecessor found:", pred_key)
-
+            deleted_record_offset = node.record_pointers[index]
             node.keys[index] = pred_key
             node.record_pointers[index] = pred_ptr
             self.write_page(node, node_offset)
@@ -807,13 +813,16 @@ class BTree:
             leaf_node = node
             leaf_offset = node_offset
             delete_index = index
+            deleted_record_offset = leaf_node.record_pointers[delete_index]
 
-        deleted_record_offset = leaf_node.record_pointers[delete_index]
+        # print(deleted_record_offset, delete_index)
+
         self.delete_from_leaf(leaf_node, leaf_offset, delete_index)
 
         if deleted_record_offset is not None:
             self.deletion_holes.append(deleted_record_offset)
 
+        # TODO: uncomment when ready
         if len(self.deletion_holes) >= RECORDS_PER_NODE:
             print("Automatic data file compaction triggered.")
             self.reorganize_data_file()
@@ -893,6 +902,7 @@ class BTree:
 
     def print_keys_in_order(self):
         print("Printing whole B-Tree by key order:")
+
         # if self.root_offset in None:
         #     print("B-Tree is empty.")
         #     return
@@ -926,21 +936,44 @@ class BTree:
             print("No deletion holes to compact.")
             return
 
+        page_size = RECORD_STRUCT.size * RECORDS_PER_PAGE
         data_file_size = os.path.getsize(DATA_FILE)
-        if data_file_size < RECORD_SIZE:
-            print("Data file is too small to compact.")
-            return
+        holes_sorted = sorted(set(self.deletion_holes), reverse=True)
+        print(holes_sorted)
 
-        holes_sorted = set(sorted(self.deletion_holes))
-        last_index = data_file_size // RECORD_SIZE - 1
-        last_offset = last_index * RECORD_SIZE
+        with open(DATA_FILE, 'r+b') as f:
+            while holes_sorted:
+                hole = holes_sorted[0]
+                if hole >= data_file_size:
+                    holes_sorted.pop(0)
+                    continue
+                last_record_offset = data_file_size - RECORD_STRUCT.size
+                if last_record_offset < 0:
+                    break
 
-        while last_offset in holes_sorted and last_index >= 0:
-            holes_sorted.remove(last_offset)
-            data_file_size -= RECORD_SIZE
-            last_index -= 1
-            last_offset = last_index * RECORD_SIZE if last_index >= 0 else -1
+                if last_record_offset == hole:
+                    holes_sorted.pop(0)
+                    data_file_size -= RECORD_STRUCT.size
+                    f.truncate(data_file_size)
+                    continue
 
-        # TODO: finish the compaction and we are done with the code part
+                # read last record
+                f.seek(last_record_offset)
+                last_record_data = f.read(RECORD_STRUCT.size)
+                if len(last_record_data) < RECORD_STRUCT.size:
+                    break
+                f.seek(hole)
+                f.write(last_record_data)
+                f.flush()
 
+                # update B-Tree pointer
+                last_record = Record.unpack(last_record_data)
+                found, path, node, node_offset, index = self.search(last_record.key)
+                if found:
+                    node.record_pointers[index] = hole
+                    self.write_page(node, node_offset)
+                holes_sorted.pop(0)
+                data_file_size -= RECORD_STRUCT.size
+                f.truncate(data_file_size)
 
+        self.deletion_holes = []
