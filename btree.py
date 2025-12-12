@@ -184,7 +184,7 @@ class BTree:
     # TODO: divide this into smaller sections and clean up (a lot of repetition inside the code)
     def split_node(self, path, new_record_offset, new_record_key, leaf_offset=None,
                    current_node=None, new_child_offset=None):
-        # print("split_node called")
+        print("split_node called")
 
         # we need to handle root split here also because split_node is called from handle_overflow recursively ?
         # no need because handle_overflow checks for root split first
@@ -240,7 +240,9 @@ class BTree:
         # insert mid_value into parent node
         if self.count_occupied_rps(parent_node) >= RECORDS_PER_NODE:
             # print("parent overflow")
-            return self.handle_overflow(path[:-1], mid_pointer, mid_key, parent_offset, parent_node, right_node_offset)
+            self.handle_overflow(path[:-1], mid_pointer, mid_key, parent_offset, parent_node, right_node_offset)
+
+            print(current_node.get_key_list())
         else:
             parent_occupied = self.count_occupied_rps(parent_node)
             for i in range(parent_occupied, child_index, -1):
@@ -260,7 +262,7 @@ class BTree:
         return {"status": "node_split_done"}
 
     def split_root(self, new_record_offset, new_record_key, leaf_offset=None, current_node=None, new_child_offset=None):
-        # print("split_root called")
+        print("split_root called")
 
         if current_node is None:
             current_node = self.read_page(self.root_offset)
@@ -275,6 +277,18 @@ class BTree:
         mid_key, mid_value = temp[mid_index]
         left_rps = temp[:mid_index]
         right_rps = temp[mid_index + 1:]
+
+        # # debug print of all the data possible
+        # print("Current node keys and pointers before split:")
+        # for i in range(RECORDS_PER_NODE):
+        #     print(f"Key {i}: {current_node.keys[i]}, Record Pointer {i}: {current_node.record_pointers[i]}")
+        # print("Children pointers before split:")
+        # for i in range(RECORDS_PER_NODE + 1):
+        #     print(f"Child Pointer {i}: {current_node.children_pointers[i]}")
+        # print("Temp keys and pointers for split:")
+        # for key, ptr in temp:
+        #     print(f"Key: {key}, Record Pointer: {ptr}")
+
 
         # manual inserting of this one stupid missing right child pointer after recursive split
         temp_new_children = list(current_node.children_pointers)
@@ -330,8 +344,15 @@ class BTree:
 
     # TODO: divide this into smaller sections and clean up (a lot of repetition inside the code)
     def handle_compensation(self, new_record_offset, new_record_key, leaf_offset=None, current_node=None,
-                            child_index=None, parent_node=None, parent_offset=None):
-        # print("handle_compensation called")
+                            child_index=None, parent_node=None, parent_offset=None, new_child_offset=None):
+        print("handle_compensation called")
+
+        if current_node.children_pointers[0] != 0:
+            print("Compensation called on non-leaf node.")
+            print("Current node children pointers:", current_node.children_pointers)
+            print("current_node:", current_node.get_key_list())
+
+
         # now we check if compensation is possible:
         # 1. start with left sibling
         # count the amount of occupied rps in sibling node
@@ -346,29 +367,28 @@ class BTree:
 
         # 2. check if compensation is possible for the left sibling first
         if left_sibling and RECORDS_PER_NODE > left_occupied > 0:
-            # print("compensating with left sibling")
-            # # generate a temp long array of node, left sibling, record and the parent record between them
-            # # left + current + new + parent
-            # temp = []
-            # for rp in left_sibling.record_pointers:
-            #     if rp != 0:
-            #         temp.append(rp)
-            # for rp in current_node.record_pointers:
-            #     if rp != 0:
-            #         temp.append(rp)
-            # temp.append(new_record_offset)
-            # temp.append(parent_node.record_pointers[child_index - 1])
-            # # sort the temp array by keys
-            # temp.sort(key=lambda rec_ptr: self.read_record(rec_ptr).key)
-
-            # middle record goes to parent
-
-            # new_key = self.read_record(new_record_offset).key
+            print("compensating with left sibling")
+            # generate a temp long array of node, left sibling, record and the parent record between them
             temp = left_sibling.get_key_list()
             temp += current_node.get_key_list()
             temp.append((new_record_key, new_record_offset))
             temp.append((parent_node.keys[child_index - 1], parent_node.record_pointers[child_index - 1]))
             temp.sort(key=lambda kp: kp[0])
+
+            if new_child_offset is not None and current_node.children_pointers[0] != 0:
+                record_inserted_at_index = next(i for i, entry in enumerate(temp) if entry[1] == new_record_offset)
+                idx = record_inserted_at_index + 1
+                combined_children = left_sibling.children_pointers + current_node.children_pointers
+                while 0 in combined_children:
+                    combined_children.remove(0)
+                combined_children.insert(idx, new_child_offset)
+            else:
+                combined_children = left_sibling.children_pointers + current_node.children_pointers
+
+            # combined_children = left_sibling.children_pointers + current_node.children_pointers
+            while 0 in combined_children:
+                combined_children.remove(0)
+            print(combined_children)
 
             total = len(temp)
             mid_index = total // 2
@@ -380,11 +400,16 @@ class BTree:
                 else:
                     left_sibling.keys[i] = 0
                     left_sibling.record_pointers[i] = 0
+
+            # children pointers adjustment
+            left_sibling.children_pointers = combined_children[:mid_index + 1] + [0] * (RECORDS_PER_NODE + 1 - len(combined_children[:mid_index + 1]))
             self.write_page(left_sibling, left_sibling_offset)
+
             # parent gets middle record
             parent_node.keys[child_index - 1] = temp[mid_index][0]
             parent_node.record_pointers[child_index - 1] = temp[mid_index][1]
             self.write_page(parent_node, parent_offset)
+
             # current node gets the rest
             for i in range(RECORDS_PER_NODE):
                 if i < total - mid_index - 1:
@@ -393,6 +418,9 @@ class BTree:
                 else:
                     current_node.keys[i] = 0
                     current_node.record_pointers[i] = 0
+
+            current_node.children_pointers = combined_children[mid_index + 1:] + [0] * (RECORDS_PER_NODE + 1 - len(combined_children[mid_index + 1:]))
+            print(current_node.children_pointers)
             self.write_page(current_node, leaf_offset)
             return {"status": "compensated_left"}
 
@@ -407,24 +435,22 @@ class BTree:
         right_occupied = self.count_occupied_rps(right_sibling) if right_sibling else 0
 
         if right_sibling and RECORDS_PER_NODE > right_occupied > 0:
-            # print("compensating with right sibling")
-            # temp = []
-            # for rp in current_node.record_pointers:
-            #     if rp != 0:
-            #         temp.append(rp)
-            # for rp in right_sibling.record_pointers:
-            #     if rp != 0:
-            #         temp.append(rp)
-            # temp.append(new_record_offset)
-            # temp.append(parent_node.record_pointers[child_index])
-            # temp.sort(key=lambda rec_ptr: self.read_record(rec_ptr).key)
-
-            # new_key = self.read_record(new_record_offset).key
+            print("compensating with right sibling")
             temp = current_node.get_key_list()
             temp += right_sibling.get_key_list()
             temp.append((new_record_key, new_record_offset))
             temp.append((parent_node.keys[child_index], parent_node.record_pointers[child_index]))
             temp.sort(key=lambda kp: kp[0])
+
+            if new_child_offset is not None and current_node.children_pointers[0] != 0:
+                record_inserted_at_index = next(i for i, entry in enumerate(temp) if entry[1] == new_record_offset)
+                idx = record_inserted_at_index + 1
+                combined_children = current_node.children_pointers + right_sibling.children_pointers
+                while 0 in combined_children:
+                    combined_children.remove(0)
+                combined_children.insert(idx, new_child_offset)
+            else:
+                combined_children = current_node.children_pointers + right_sibling.children_pointers
 
             total = len(temp)
             mid_index = total // 2
@@ -436,11 +462,15 @@ class BTree:
                 else:
                     current_node.keys[i] = 0
                     current_node.record_pointers[i] = 0
+
+            current_node.children_pointers = combined_children[:mid_index + 1] + [0] * (RECORDS_PER_NODE + 1 - len(combined_children[:mid_index + 1]))
             self.write_page(current_node, leaf_offset)
+
             # parent gets middle record
             parent_node.keys[child_index] = temp[mid_index][0]
             parent_node.record_pointers[child_index] = temp[mid_index][1]
             self.write_page(parent_node, parent_offset)
+
             # right sibling gets the rest
             for i in range(RECORDS_PER_NODE):
                 if i < total - mid_index - 1:
@@ -449,12 +479,13 @@ class BTree:
                 else:
                     right_sibling.keys[i] = 0
                     right_sibling.record_pointers[i] = 0
+            right_sibling.children_pointers = combined_children[mid_index + 1:] + [0] * (RECORDS_PER_NODE + 1 - len(combined_children[mid_index + 1:]))
             self.write_page(right_sibling, right_sibling_offset)
             return {"status": "compensated_right"}
 
     def handle_overflow(self, path, new_record_offset, new_record_key, leaf_offset=None, current_node=None,
                         new_child_offset=None):
-        # print("handle_overflow called")
+        print("handle_overflow called")
 
         if len(path) < 2:
             # print("splitting root")
@@ -469,7 +500,7 @@ class BTree:
 
         #   1-3. handle compensation if possible
         compensation_result = self.handle_compensation(new_record_offset, new_record_key, leaf_offset, current_node,
-                                                       child_index, parent_node, parent_offset)
+                                                       child_index, parent_node, parent_offset, new_child_offset)
         if compensation_result is not None:
             # print("compensation done")
             return compensation_result
