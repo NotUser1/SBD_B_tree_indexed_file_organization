@@ -210,6 +210,16 @@ class BTree:
         right_rps = temp[mid_index + 1:]
 
         child_index = parent_node.children_pointers.index(leaf_offset)
+        children_pointers = current_node.children_pointers
+        if new_child_offset is not None:
+            try:
+                # print("Trying to insert new child offset into split children")
+                index = next(i for i, entry in enumerate(temp) if entry[1] == new_record_offset)
+                insert_pos = index + 1
+                children_pointers.insert(insert_pos, new_child_offset)
+                new_child_offset = None  # prevent double insertion
+            except ValueError:
+                pass
 
         # save left node to current node
         for i in range(RECORDS_PER_NODE):
@@ -219,8 +229,8 @@ class BTree:
             else:
                 current_node.keys[i] = 0
                 current_node.record_pointers[i] = 0
-        left_children = current_node.children_pointers[:mid_index + 1]
-        current_node.children_pointers = left_children + [0] * (RECORDS_PER_NODE + 1 - len(left_children))
+        left_children = children_pointers[:mid_index + 1] + [0] * (RECORDS_PER_NODE + 1 - len(children_pointers[:mid_index + 1]))
+        current_node.children_pointers = left_children
         self.write_page(current_node, leaf_offset)
 
         # create and save right node to the end of btree file
@@ -232,17 +242,15 @@ class BTree:
             else:
                 right_node.keys[i] = 0
                 right_node.record_pointers[i] = 0
-        right_children = current_node.children_pointers[mid_index + 1:]
-        right_node.children_pointers = right_children + [0] * (RECORDS_PER_NODE + 1 - len(right_children))
+        right_node_children = children_pointers[mid_index + 1:] + [0] * (RECORDS_PER_NODE + 1 - len(children_pointers[mid_index + 1:]))
+        right_node.children_pointers = right_node_children
         # right_node.is_leaf = all(ptr == 0 for ptr in right_node.children_pointers)
         right_node_offset = self.append_page(right_node)
 
         # insert mid_value into parent node
         if self.count_occupied_rps(parent_node) >= RECORDS_PER_NODE:
             # print("parent overflow")
-            self.handle_overflow(path[:-1], mid_pointer, mid_key, parent_offset, parent_node, right_node_offset)
-
-            print(current_node.get_key_list())
+            return self.handle_overflow(path[:-1], mid_pointer, mid_key, parent_offset, parent_node, right_node_offset)
         else:
             parent_occupied = self.count_occupied_rps(parent_node)
             for i in range(parent_occupied, child_index, -1):
@@ -277,18 +285,6 @@ class BTree:
         mid_key, mid_value = temp[mid_index]
         left_rps = temp[:mid_index]
         right_rps = temp[mid_index + 1:]
-
-        # # debug print of all the data possible
-        # print("Current node keys and pointers before split:")
-        # for i in range(RECORDS_PER_NODE):
-        #     print(f"Key {i}: {current_node.keys[i]}, Record Pointer {i}: {current_node.record_pointers[i]}")
-        # print("Children pointers before split:")
-        # for i in range(RECORDS_PER_NODE + 1):
-        #     print(f"Child Pointer {i}: {current_node.children_pointers[i]}")
-        # print("Temp keys and pointers for split:")
-        # for key, ptr in temp:
-        #     print(f"Key: {key}, Record Pointer: {ptr}")
-
 
         # manual inserting of this one stupid missing right child pointer after recursive split
         temp_new_children = list(current_node.children_pointers)
@@ -346,12 +342,6 @@ class BTree:
     def handle_compensation(self, new_record_offset, new_record_key, leaf_offset=None, current_node=None,
                             child_index=None, parent_node=None, parent_offset=None, new_child_offset=None):
         print("handle_compensation called")
-
-        if current_node.children_pointers[0] != 0:
-            print("Compensation called on non-leaf node.")
-            print("Current node children pointers:", current_node.children_pointers)
-            print("current_node:", current_node.get_key_list())
-
 
         # now we check if compensation is possible:
         # 1. start with left sibling
@@ -882,6 +872,7 @@ class BTree:
                     self._print_subtree(child_offset, level + 1)
 
     def print_operation_stats(self):
+        # return
         self.print_tree()
         print("Operation statistics (for btree file):")
         print(f"tree height: {self.height}")
@@ -932,6 +923,7 @@ class BTree:
         return Record.unpack(data)
 
     def print_keys_in_order(self):
+        counter = 0
         print("Printing whole B-Tree by key order:")
 
         # if self.root_offset in None:
@@ -939,6 +931,7 @@ class BTree:
         #     return
 
         def traverse(offset):
+            nonlocal counter
             if offset == 0:
                 pass
             node = self.read_page(offset)
@@ -947,6 +940,7 @@ class BTree:
                 for k, rp in keys:
                     record = self.read_record_from_data_file(record_offset=rp)
                     print(f"Record: {record}")
+                    counter += 1
             else:
                 for i in range(len(keys)):
                     child_offset = node.children_pointers[i]
@@ -954,11 +948,13 @@ class BTree:
                     k, rp = keys[i]
                     record = self.read_record_from_data_file(record_offset=rp)
                     print(f"Record: {record}")
+                    counter += 1
                 # traverse last child
                 last_child_offset = node.children_pointers[len(keys)]
                 traverse(last_child_offset)
 
         traverse(self.root_offset)
+        print(f"Total records printed: {counter}")
         self.data_page = None
         self.data_page_offset = None
 

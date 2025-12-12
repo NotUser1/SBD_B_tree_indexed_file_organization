@@ -2,19 +2,6 @@ from btree import *
 import random
 
 
-def read_data_from_file(file_path):
-    print(file_path)
-
-
-def generate_random_records(num_records):
-    with open(DATA_FILE, 'wb') as f:
-        for _ in range(num_records):
-            key = random.randint(0, 1000)
-            x = round(random.uniform(0.0, 1000.0) / 100, 2)
-            y = round(random.uniform(0.0, 1000.0) / 100, 2)
-            f.write(RECORD_STRUCT.pack(key, x, y))
-
-
 def handle_keyboard_operations(btree):
     while True:
         print("Select operation:")
@@ -115,3 +102,14 @@ def update_record_in_data_file(key, new_x, new_y):
                     f.write(RECORD_STRUCT.pack(key, new_x, new_y))
                     print(f"Record with key {key} updated to x: {new_x}, y: {new_y}")
                     return
+
+
+def generate_input_file(file_path, num_lines):
+    key = 1
+    with open(file_path, 'w') as f:
+        for _ in range(num_lines):
+            # key = random.randint(0, 1000)
+            x = round(random.uniform(0.0, 1000.0) / 100, 2)
+            y = round(random.uniform(0.0, 1000.0) / 100, 2)
+            f.write(f"insert {key} {x} {y}\n")
+            key += 1

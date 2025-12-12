@@ -17,11 +17,16 @@ def main():
     print("Select mode of operation:")
     print("1. Read operations and data from keyboard")
     print("2. Read sequence of operations from file")
-    choice = input("Enter your choice (1/2): ")
+    print("3. Generate x lines of input")
+    choice = input("Enter your choice (1/2/3): ")
     if choice == '1':
         IO.handle_keyboard_operations(btree)
     elif choice == '2':
         IO.handle_file_operations(btree, 'operations4.txt')
+    elif choice == '3':
+        num_lines = int(input("Enter number of lines to generate: "))
+        IO.generate_input_file('operations_temp.txt', num_lines)
+        IO.handle_file_operations(btree, 'operations_temp.txt')
     else:
         print("Invalid choice. Exiting.")
         sys.exit(1)
