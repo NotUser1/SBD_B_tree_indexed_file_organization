@@ -12,6 +12,7 @@ def handle_keyboard_operations(btree):
         print("5. Print B-Tree by key")
         print("6. Update record in data file")
         print("7. Reorganize data file")
+        print("8. Print B-Tree structure")
         choice = input("Enter your choice: ")
         if choice == '1':
             key = int(input("Enter key (integer): "))
@@ -45,6 +46,8 @@ def handle_keyboard_operations(btree):
             update_record_in_data_file(key, new_x, new_y)
         elif choice == '7':
             btree.reorganize_data_file()
+        elif choice == '8':
+            btree.print_tree()
         else:
             print("Invalid choice. Please try again.")
         btree.print_operation_stats()
@@ -105,10 +108,14 @@ def update_record_in_data_file(key, new_x, new_y):
 
 
 def generate_input_file(file_path, num_lines):
-    key = 1
+    keys = set()
     with open(file_path, 'w') as f:
         for _ in range(num_lines):
-            # key = random.randint(0, 1000)
+            while True:
+                key = random.randint(1, num_lines * 10)
+                if key not in keys:
+                    keys.add(key)
+                    break
             x = round(random.uniform(0.0, 1000.0) / 100, 2)
             y = round(random.uniform(0.0, 1000.0) / 100, 2)
             f.write(f"insert {key} {x} {y}\n")
