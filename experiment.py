@@ -32,14 +32,10 @@ def run_fill_experiment(max_n=10000):
         else:
             b.insert(r)
 
-        try:
-            size = os.path.getsize(BTREE_FILE)
-            node_count = size // BTreeNode.NODE_SIZE if size > 0 else 0
-            capacity = node_count * RECORDS_PER_NODE
-            pct = n / capacity if capacity > 0 else 0.0
-        except Exception:
-            capacity = 0
-            pct = 0.0
+        size = os.path.getsize(BTREE_FILE)
+        node_count = size // BTreeNode.NODE_SIZE if size > 0 else 0
+        capacity = node_count * RECORDS_PER_NODE
+        pct = n / capacity if capacity > 0 else 0.0
 
         xs.append(n)
         percentages.append(pct)
@@ -48,6 +44,29 @@ def run_fill_experiment(max_n=10000):
             print(f"Inserted {n} / {max_n} - node_count: {node_count}, capacity: {capacity}, fill: {pct:.3f}")
 
     return xs, percentages
+
+
+def key_print_read_count(n):
+    keys = set()
+    b = BTree()
+    values = []
+    for n in range(n):
+        while True:
+            key = random.randint(1, 1_000_000)
+            if key not in keys:
+                keys.add(key)
+                break
+        r = Record(key, float(1), float(1))
+        if b.height == 0:
+            b.create_root(r)
+        else:
+            b.insert(r)
+
+        if n % 100 == 0:
+            b.print_keys_in_order()
+            values.append((n, b.operation_data_page_reads + b.operation_page_reads))
+            b.operation_data_page_reads = 0
+    return values
 
 
 def plot_and_save(xs, percentages, out_path='fill_percentage.png'):
@@ -96,7 +115,6 @@ def run_trial(n, op="insert"):
         del_key = random.choice(list(keys))
         b.delete(del_key)
 
-
     reads_delta = b.operation_page_reads - base_reads
     writes_delta = b.operation_page_writes - base_writes
     appends_delta = b.operation_page_appends - base_appends
@@ -105,7 +123,7 @@ def run_trial(n, op="insert"):
     return reads_delta, writes_delta, appends_delta, tree_height
 
 
-def measure_average(n=50, trials=TRIALS, op = "insert"):
+def measure_average(n=50, trials=TRIALS, op="insert"):
     results = []
     for i in range(trials):
         delta = run_trial(n, op)
@@ -127,7 +145,8 @@ def measure_average(n=50, trials=TRIALS, op = "insert"):
 
     print(f"Trials: {len(results)}")
     print(f"Individual (reads, writes, appends, height) per trial: {results}")
-    print(f"Average for {n}-th insert -> reads: {avg_reads:.2f}, writes: {avg_writes:.2f}, appends: {avg_appends:.2f}, height: {avg_height:.2f}")
+    print(
+        f"Average for {n}-th insert -> reads: {avg_reads:.2f}, writes: {avg_writes:.2f}, appends: {avg_appends:.2f}, height: {avg_height:.2f}")
 
     return avg_reads, avg_writes, avg_appends, avg_height
 

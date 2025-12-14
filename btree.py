@@ -528,8 +528,8 @@ class BTree:
         return self.split_node(path, new_record_offset, new_record_key, leaf_offset, current_node, new_child_offset)
 
     def insert(self, record: Record):
-        # print("----------------NEW INSERT OPERATION----------------")
-        # print(f"Inserting record with key: {record.key}")
+        print("----------------NEW INSERT OPERATION----------------")
+        print(f"Inserting record with key: {record.key}")
 
         found, path, node, node_offset, index = self.search(record.key)
 
@@ -588,7 +588,7 @@ class BTree:
 
     def delete_from_leaf(self, leaf_node: BTreeNode, leaf_offset: int, delete_index: int):
         # usuń z liścia i przesuń wszystko w lewo
-        # print("delete_from_leaf called")
+        print("delete_from_leaf called")
         occupied = self.count_occupied_rps(leaf_node)
         for i in range(delete_index, occupied - 1):
             leaf_node.keys[i] = leaf_node.keys[i + 1]
@@ -598,7 +598,7 @@ class BTree:
         self.write_page(leaf_node, leaf_offset)
 
     def compensation_on_delete(self, path, leaf_node, leaf_offset) -> bool:
-        # print("compensation_on_delete called")
+        print("compensation_on_delete called")
         if len(path) < 2:
             # cannot compensate on root (chyba)
             return False
@@ -689,7 +689,7 @@ class BTree:
         return False
 
     def merge_nodes(self, path, leaf_node, leaf_offset, child_index):
-        # print("merge_nodes called")
+        print("merge_nodes called")
         if len(path) < 2:
             # cannot merge on root (chyba)
             return {"status": "cannot_merge_root"}
@@ -802,7 +802,7 @@ class BTree:
             return {"status": "merged_right"}
 
     def handle_underflow(self, path, leaf_node, leaf_offset):
-        # print("handle_underflow called")
+        print("handle_underflow called")
         if len(path) < 2:
             return {"status": "cannot_handle_underflow_root"}
 
@@ -818,7 +818,7 @@ class BTree:
 
         # 2. if compensation not possible, merge nodes
         merge_res = self.merge_nodes(path, leaf_node, leaf_offset, child_index)
-        # print(merge_res)
+        print(merge_res)
 
         parent_node = self.read_page(parent_offset)
         parent_occupied = self.count_occupied_rps(parent_node)
@@ -834,8 +834,8 @@ class BTree:
         return {"status": "merged_no_underflow"}
 
     def delete(self, record_key: int):
-        # print("----------------NEW DELETE OPERATION----------------")
-        # print(f"Deleting record with key: {record_key}")
+        print("----------------NEW DELETE OPERATION----------------")
+        print(f"Deleting record with key: {record_key}")
 
         found, path, node, node_offset, index = self.search(record_key)
 
@@ -942,7 +942,7 @@ class BTree:
                 record_data = self.data_page[rel:rel + RECORD_STRUCT.size]
                 return Record.unpack(record_data)
 
-        # fallback: bezpośredni odczyt (np. gdy strona krótsza niż oczekiwano)
+        # fallback
         with open(DATA_FILE, 'rb') as f:
             f.seek(record_offset)
             data = f.read(RECORD_STRUCT.size)

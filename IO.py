@@ -41,8 +41,8 @@ def handle_keyboard_operations(btree):
             btree.print_keys_in_order()
         elif choice == '6':
             key = int(input("Enter key to update (integer): "))
-            new_x = float(input("Enter new x value (float): "))
-            new_y = float(input("Enter new y value (float): "))
+            new_x = float(input("Enter new x value (float with a dot): "))
+            new_y = float(input("Enter new y value (float with a dot): "))
             update_record_in_data_file(key, new_x, new_y)
         elif choice == '7':
             btree.reorganize_data_file()
@@ -91,6 +91,7 @@ def handle_file_operations(btree, file_path):
 
 def update_record_in_data_file(key, new_x, new_y):
     with open(DATA_FILE, 'r+b') as f:
+        f.seek(4)
         while True:
             bytes_read = f.read(RECORD_SIZE * RECORDS_PER_PAGE)
             if not bytes_read:
@@ -99,6 +100,7 @@ def update_record_in_data_file(key, new_x, new_y):
             page_off = f.tell()
             for i in range(0, len(bytes_read), RECORD_SIZE):
                 record_data = bytes_read[i:i + RECORD_SIZE]
+                # print(len(record_data))
                 record_key, x, y = RECORD_STRUCT.unpack(record_data)
                 if record_key == key:
                     f.seek(page_off - len(bytes_read) + i)
