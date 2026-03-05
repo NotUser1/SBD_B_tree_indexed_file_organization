@@ -152,8 +152,11 @@ def measure_average(n=50, trials=TRIALS, op="insert"):
 
 
 if __name__ == "__main__":
-    xs, pcts = run_fill_experiment(10000)
-    plot_and_save(xs, pcts)
+    # xs, pcts = run_fill_experiment(10000)
+    # plot_and_save(xs, pcts)
+
+    key_print_read_count(1000)
+
     # print("INSERTS")
     # measure_average(50, op="insert")
     # measure_average(100, op="insert")
